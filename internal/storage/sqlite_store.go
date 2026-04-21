@@ -368,6 +368,11 @@ func (s *sqliteStore) ListIssues(ctx context.Context, filter ListIssuesFilter, l
 		args = append(args, filter.Level)
 		n++
 	}
+	if filter.Search != "" {
+		q += fmt.Sprintf(" AND (i.title LIKE '%%'||?%d||'%%' OR i.culprit LIKE '%%'||?%d||'%%')", n, n)
+		args = append(args, filter.Search)
+		n++
+	}
 	if filter.Cursor > 0 {
 		q += fmt.Sprintf(" AND i.last_seen_at < ?%d", n)
 		args = append(args, filter.Cursor)
@@ -536,4 +541,96 @@ func (s *sqliteStore) ListEventsByIssue(ctx context.Context, issueID string, lim
 		})
 	}
 	return items, nil
+}
+
+func (s *sqliteStore) GetDashboardStats(ctx context.Context) (DashboardStats, error) {
+	var st DashboardStats
+	now := unixNow()
+
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE status='open'`).Scan(&st.OpenIssues); err != nil {
+		return st, fmt.Errorf("open issues count: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE status='open' AND level='fatal'`).Scan(&st.FatalOpenIssues); err != nil {
+		return st, fmt.Errorf("fatal open issues count: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE received_at > ?1`, now-86400).Scan(&st.Events24h); err != nil {
+		return st, fmt.Errorf("events 24h count: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE status='resolved' AND updated_at > ?1`, now-7*86400).Scan(&st.ResolvedLast7d); err != nil {
+		return st, fmt.Errorf("resolved 7d count: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx, `SELECT level, COUNT(*) FROM issues WHERE status='open' GROUP BY level ORDER BY COUNT(*) DESC`)
+	if err != nil {
+		return st, fmt.Errorf("level counts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var lc LevelCount
+		if err := rows.Scan(&lc.Level, &lc.Count); err != nil {
+			return st, err
+		}
+		st.LevelCounts = append(st.LevelCounts, lc)
+	}
+	if err := rows.Err(); err != nil {
+		return st, err
+	}
+
+	rows2, err := s.db.QueryContext(ctx, `SELECT platform, COUNT(*) FROM issues WHERE status='open' GROUP BY platform ORDER BY COUNT(*) DESC LIMIT 5`)
+	if err != nil {
+		return st, fmt.Errorf("platform counts: %w", err)
+	}
+	defer rows2.Close()
+	for rows2.Next() {
+		var pc PlatformCount
+		if err := rows2.Scan(&pc.Platform, &pc.Count); err != nil {
+			return st, err
+		}
+		st.PlatformCounts = append(st.PlatformCounts, pc)
+	}
+	return st, rows2.Err()
+}
+
+func (s *sqliteStore) GetEventVolumeByDay(ctx context.Context, days int) ([]DayCount, error) {
+	since := unixNow() - int64(days)*86400
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT date(datetime(received_at,'unixepoch')) AS day, COUNT(*)
+		 FROM events WHERE received_at > ?1
+		 GROUP BY day ORDER BY day`,
+		since,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("event volume by day: %w", err)
+	}
+	defer rows.Close()
+	var out []DayCount
+	for rows.Next() {
+		var dc DayCount
+		if err := rows.Scan(&dc.Day, &dc.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, dc)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqliteStore) ListReleaseStats(ctx context.Context) ([]ReleaseStat, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT release, COUNT(DISTINCT issue_id), COUNT(*), MAX(received_at)
+		 FROM events WHERE release != ''
+		 GROUP BY release ORDER BY MAX(received_at) DESC LIMIT 50`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list release stats: %w", err)
+	}
+	defer rows.Close()
+	var out []ReleaseStat
+	for rows.Next() {
+		var rs ReleaseStat
+		if err := rows.Scan(&rs.Release, &rs.IssueCount, &rs.EventCount, &rs.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, rs)
+	}
+	return out, rows.Err()
 }

@@ -222,3 +222,12 @@ func (f *fakeStore) StoreSourceMap(context.Context, storage.SourceMapParams) err
 func (f *fakeStore) GetSourceMap(context.Context, string, string, string) (string, error) {
 	return "", storage.ErrNotFound
 }
+func (f *fakeStore) GetDashboardStats(context.Context) (storage.DashboardStats, error) {
+	return storage.DashboardStats{}, nil
+}
+func (f *fakeStore) GetEventVolumeByDay(context.Context, int) ([]storage.DayCount, error) {
+	return nil, nil
+}
+func (f *fakeStore) ListReleaseStats(context.Context) ([]storage.ReleaseStat, error) {
+	return nil, nil
+}

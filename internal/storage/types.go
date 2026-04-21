@@ -34,6 +34,9 @@ type Store interface {
 	GetSourceMap(ctx context.Context, projectID, release, filename string) (string, error)
 	GetIssue(ctx context.Context, issueID string) (IssueDetail, error)
 	ListEventsByIssue(ctx context.Context, issueID string, limit int) ([]EventRecord, error)
+	GetDashboardStats(ctx context.Context) (DashboardStats, error)
+	GetEventVolumeByDay(ctx context.Context, days int) ([]DayCount, error)
+	ListReleaseStats(ctx context.Context) ([]ReleaseStat, error)
 }
 
 // BootstrapParams contains the first-run data created by `bugrail init`.
@@ -119,6 +122,7 @@ type ListIssuesFilter struct {
 	Platform    string // "" for all
 	Environment string // "" for all
 	Level       string // "fatal", "error", "warning", "info", "debug", or "" for all
+	Search      string // partial match on title and culprit; "" for all
 	Cursor      int64  // last_seen_at of last seen item for cursor pagination; 0 = first page
 }
 
@@ -173,6 +177,42 @@ type AttachmentMeta struct {
 	Filename    string
 	ContentType string
 	Size        int64
+}
+
+// DashboardStats holds pre-aggregated counts and breakdowns for the dashboard page.
+type DashboardStats struct {
+	OpenIssues      int64
+	FatalOpenIssues int64
+	Events24h       int64
+	ResolvedLast7d  int64
+	LevelCounts     []LevelCount
+	PlatformCounts  []PlatformCount
+}
+
+// LevelCount is one row of the issues-by-level breakdown.
+type LevelCount struct {
+	Level string
+	Count int64
+}
+
+// PlatformCount is one row of the issues-by-platform breakdown.
+type PlatformCount struct {
+	Platform string
+	Count    int64
+}
+
+// DayCount is one data point for the event-volume-by-day chart.
+type DayCount struct {
+	Day   string // "2006-01-02"
+	Count int64
+}
+
+// ReleaseStat is one row of the releases table.
+type ReleaseStat struct {
+	Release    string
+	IssueCount int64
+	EventCount int64
+	LastSeen   int64
 }
 
 // EventRecord is used by the issue detail page.
