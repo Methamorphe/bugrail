@@ -27,10 +27,11 @@ const (
 
 // Config captures the process configuration derived from environment variables.
 type Config struct {
-	DataDir              string
-	DatabaseURL          string
-	ListenAddr           string
-	RateLimitPerProject  int
+	DataDir             string
+	DatabaseURL         string
+	ListenAddr          string
+	RateLimitPerProject int
+	BaseURLOverride     string
 }
 
 // Load reads Bugrail configuration from the environment and applies defaults.
@@ -47,6 +48,7 @@ func Load() Config {
 		DatabaseURL:         strings.TrimSpace(os.Getenv("BUGRAIL_DATABASE_URL")),
 		ListenAddr:          strings.TrimSpace(os.Getenv("BUGRAIL_LISTEN_ADDR")),
 		RateLimitPerProject: rl,
+		BaseURLOverride:     strings.TrimSpace(os.Getenv("BUGRAIL_BASE_URL")),
 	}
 
 	if cfg.DataDir == "" {
@@ -99,8 +101,12 @@ func (c Config) SQLSource() string {
 	return u.String()
 }
 
-// BaseURL returns the best-effort local base URL for generated DSNs and prompts.
+// BaseURL returns the public base URL used for DSN generation.
+// BUGRAIL_BASE_URL takes precedence; otherwise it is derived from BUGRAIL_LISTEN_ADDR.
 func (c Config) BaseURL() string {
+	if c.BaseURLOverride != "" {
+		return strings.TrimRight(c.BaseURLOverride, "/")
+	}
 	host, port, err := net.SplitHostPort(c.ListenAddr)
 	if err != nil {
 		return "http://localhost:8080"
