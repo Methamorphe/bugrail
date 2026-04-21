@@ -1,8 +1,7 @@
 # Self-hosting Bugrail
 
 This guide walks you through deploying Bugrail on a Linux VPS so you have a real public DSN
-to point your SDKs at. The result: a single binary behind nginx, running as a systemd service,
-with HTTPS via Certbot.
+to point your SDKs at. The result: a single binary behind nginx, running as a systemd service.
 
 Estimated time: 20 minutes on a fresh Debian/Ubuntu server.
 
@@ -11,9 +10,10 @@ Estimated time: 20 minutes on a fresh Debian/Ubuntu server.
 ## Requirements
 
 - A VPS with at least 512 MB RAM and 2 GB disk (a 5 €/month Hetzner CX11 or equivalent is fine)
-- A domain or subdomain pointing to that server (e.g. `bugrail.example.com`)
 - Go 1.23+ **or** a pre-built binary from the releases page
 - Root or sudo access on the server
+
+A domain name is **not required**. See [section 6](#6-expose-bugrail-choose-one) for your options.
 
 ---
 
@@ -72,7 +72,7 @@ BUGRAIL_LISTEN_ADDR=127.0.0.1:8080
 # Default: 1000. Lower this if you want to protect disk space.
 BUGRAIL_RATE_LIMIT_PER_PROJECT=1000
 
-# Optional: use PostgreSQL instead of SQLite (see section 7).
+# Optional: use PostgreSQL instead of SQLite (see the PostgreSQL section).
 # BUGRAIL_DATABASE_URL=postgres://user:pass@localhost/bugrail?sslmode=disable
 EOF
 chmod 600 /etc/bugrail.env
@@ -93,9 +93,9 @@ sudo -u bugrail env $(cat /etc/bugrail.env | xargs) bugrail init \
   --project-name "My App"
 ```
 
-The command prints a DSN. **Ignore the hostname for now** — it will show `localhost:8080`
-because the binary doesn't know your public URL yet. You will reconstruct the real DSN in
-section 6 after nginx is configured.
+The command prints a DSN. **Ignore the hostname for now** — it shows `localhost:8080`
+because the binary doesn't know your public address yet. You will reconstruct the DSN in
+section 7 once you know your public URL.
 
 Example output:
 
@@ -105,7 +105,7 @@ Project: My App
 DSN: http://<key>@localhost:8080/1
 ```
 
-Note the `<key>` part — you will need it in section 6.
+Note the `<key>` — you will need it in section 7.
 
 ---
 
@@ -124,7 +124,6 @@ EnvironmentFile=/etc/bugrail.env
 ExecStart=/usr/local/bin/bugrail serve
 Restart=on-failure
 RestartSec=5
-# Harden the process
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -148,7 +147,54 @@ journalctl -u bugrail -n 30
 
 ---
 
-## 6. Set up nginx as a reverse proxy with HTTPS
+## 6. Expose Bugrail — choose one
+
+Three options, in order of simplicity. Pick the one that fits your situation.
+
+---
+
+### Option A — HTTP only (simplest, no domain needed)
+
+Skip nginx entirely. Open port 8080 directly, change `BUGRAIL_LISTEN_ADDR` to listen on all
+interfaces, and access Bugrail via its IP.
+
+```bash
+# In /etc/bugrail.env, change:
+BUGRAIL_LISTEN_ADDR=0.0.0.0:8080
+```
+
+Restart the service and open the firewall:
+
+```bash
+systemctl restart bugrail
+ufw allow 22/tcp
+ufw allow 8080/tcp
+ufw enable
+```
+
+Your public URL is `http://<server-ip>:8080` and your DSN will look like:
+
+```
+http://<key>@<server-ip>:8080/1
+```
+
+**When to use this:** local testing, a private network, or a quick proof of concept.
+Traffic is unencrypted — don't use this if the server is reachable from the internet and you
+care about the DSN key leaking.
+
+---
+
+### Option B — HTTPS with sslip.io (no domain purchase needed)
+
+`sslip.io` is a free public DNS service. Any address like `1-2-3-4.sslip.io` resolves to
+the IP `1.2.3.4`. Let's Encrypt can issue a certificate for it, so you get valid HTTPS
+without buying a domain.
+
+Replace dots with dashes in your server IP to build the hostname:
+
+```
+Server IP: 1.2.3.4  →  hostname: bugrail.1-2-3-4.sslip.io
+```
 
 Install nginx and Certbot:
 
@@ -156,23 +202,20 @@ Install nginx and Certbot:
 apt install -y nginx certbot python3-certbot-nginx
 ```
 
-Create a site config:
+Create a site config (replace `1-2-3-4` with your actual IP):
 
 ```bash
 cat > /etc/nginx/sites-available/bugrail << 'EOF'
 server {
     listen 80;
-    server_name bugrail.example.com;  # <-- replace with your domain
+    server_name bugrail.1-2-3-4.sslip.io;
 
-    # Certbot will rewrite this block to HTTPS automatically.
     location / {
         proxy_pass         http://127.0.0.1:8080;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
-
-        # Sentry SDKs send large payloads (source maps, attachments).
         client_max_body_size 50m;
     }
 }
@@ -182,14 +225,69 @@ ln -s /etc/nginx/sites-available/bugrail /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
 ```
 
-Obtain a TLS certificate:
+Obtain the certificate:
 
 ```bash
+certbot --nginx -d bugrail.1-2-3-4.sslip.io
+```
+
+Open the firewall:
+
+```bash
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+```
+
+Your public URL is `https://bugrail.1-2-3-4.sslip.io`.
+
+**When to use this:** when you want real HTTPS without paying for a domain. The sslip.io
+service is maintained by the Cloud Foundry community and has been reliable for years, but
+it's a third-party dependency — if it goes down your hostname stops resolving. For anything
+critical, buy a domain (Option C).
+
+---
+
+### Option C — HTTPS with your own domain
+
+Same as Option B but with a real domain you control. Point an A record at your server IP,
+then:
+
+```bash
+apt install -y nginx certbot python3-certbot-nginx
+
+cat > /etc/nginx/sites-available/bugrail << 'EOF'
+server {
+    listen 80;
+    server_name bugrail.example.com;
+
+    location / {
+        proxy_pass         http://127.0.0.1:8080;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        client_max_body_size 50m;
+    }
+}
+EOF
+
+ln -s /etc/nginx/sites-available/bugrail /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
 certbot --nginx -d bugrail.example.com
 ```
 
-Certbot will modify the nginx config to redirect HTTP to HTTPS and add the certificate.
-Test renewal: `certbot renew --dry-run`.
+Open the firewall:
+
+```bash
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+```
+
+Test certificate renewal: `certbot renew --dry-run`.
 
 ---
 
@@ -198,22 +296,18 @@ Test renewal: `certbot renew --dry-run`.
 The DSN format is:
 
 ```
-https://<key>@<your-domain>/<project-id>
+<scheme>://<key>@<your-host>/<project-id>
 ```
 
-From the `bugrail init` output:
-- `<key>` — the long hex string shown after the `@` in the printed DSN
-- `<your-domain>` — `bugrail.example.com` (or whatever you configured)
-- `<project-id>` — the number at the end (usually `1` for the first project)
+From the `bugrail init` output, take the `<key>`. Then substitute your public address:
 
-Example:
+| Setup | DSN |
+|---|---|
+| Option A (HTTP + IP) | `http://<key>@1.2.3.4:8080/1` |
+| Option B (sslip.io) | `https://<key>@bugrail.1-2-3-4.sslip.io/1` |
+| Option C (own domain) | `https://<key>@bugrail.example.com/1` |
 
-```
-https://abc123def456@bugrail.example.com/1
-```
-
-Use this in your SDK config. You can also find the key in the Bugrail dashboard under the
-project settings page once you log in.
+The project ID is `1` for the first project created by `bugrail init`.
 
 ---
 
@@ -223,55 +317,52 @@ Replace the Sentry DSN in your application. No other change needed.
 
 ```js
 // Node / JavaScript
-Sentry.init({ dsn: "https://<key>@bugrail.example.com/1" });
+Sentry.init({ dsn: "https://<key>@bugrail.1-2-3-4.sslip.io/1" });
 ```
 
 ```python
 # Python
-sentry_sdk.init(dsn="https://<key>@bugrail.example.com/1")
+sentry_sdk.init(dsn="https://<key>@bugrail.1-2-3-4.sslip.io/1")
 ```
 
 ```php
 // PHP
-\Sentry\init(['dsn' => 'https://<key>@bugrail.example.com/1']);
+\Sentry\init(['dsn' => 'https://<key>@bugrail.1-2-3-4.sslip.io/1']);
 ```
 
 ```go
 // Go
-sentry.Init(sentry.ClientOptions{Dsn: "https://<key>@bugrail.example.com/1"})
+sentry.Init(sentry.ClientOptions{Dsn: "https://<key>@bugrail.1-2-3-4.sslip.io/1"})
 ```
 
 ---
 
 ## 9. Verify end-to-end
 
-Trigger a test error in your app (or use the seed tool):
+Trigger a test error in your app, or use the seed tool from the repo:
 
 ```bash
-# From a machine that can reach bugrail.example.com
-go run ./cmd/seed https://<key>@bugrail.example.com/1
+go run ./cmd/seed https://<key>@bugrail.1-2-3-4.sslip.io/1
 ```
 
-Then open `https://bugrail.example.com` in a browser, log in, and check the dashboard.
+Open your public URL in a browser, log in, and check the dashboard.
 
 ---
 
 ## Optional: PostgreSQL instead of SQLite
 
 SQLite is the right default for most deployments. Switch to PostgreSQL if you expect
-concurrent writes from multiple app instances or need WAL-mode performance at scale.
+concurrent writes from multiple app instances or need higher write throughput.
 
 ```bash
-# Create the database
 createdb bugrail
 createuser bugrail --pwprompt
 
-# Add to /etc/bugrail.env
+# Add to /etc/bugrail.env:
 BUGRAIL_DATABASE_URL=postgres://bugrail:password@localhost/bugrail?sslmode=disable
 ```
 
-Remove the `BUGRAIL_DATA_DIR` line if you no longer need SQLite. Restart the service and
-re-run `bugrail init` (or `bugrail migrate` if re-initializing an existing deployment).
+Restart the service and run `bugrail migrate` (or re-run `bugrail init` for a fresh install).
 
 ---
 
@@ -280,7 +371,6 @@ re-run `bugrail init` (or `bugrail migrate` if re-initializing an existing deplo
 **Upgrade the binary:**
 
 ```bash
-# Build or download the new binary to a temp path, then atomically replace
 install -o root -g root -m 755 bugrail-new /usr/local/bin/bugrail
 systemctl restart bugrail
 ```
@@ -288,7 +378,7 @@ systemctl restart bugrail
 **Backup SQLite:**
 
 ```bash
-# Safe online backup — SQLite's .backup command flushes WAL before copying
+# Safe online backup — flushes WAL before copying
 sqlite3 /var/lib/bugrail/bugrail.sqlite3 ".backup /tmp/bugrail-$(date +%Y%m%d).sqlite3"
 ```
 
@@ -302,18 +392,4 @@ journalctl -u bugrail -f
 
 ```bash
 sudo -u bugrail env $(cat /etc/bugrail.env | xargs) bugrail migrate
-```
-
----
-
-## Firewall
-
-Only ports 80 and 443 need to be open to the internet. Bugrail's HTTP server listens on
-`127.0.0.1:8080` and should never be exposed directly.
-
-```bash
-ufw allow 22/tcp   # SSH
-ufw allow 80/tcp   # HTTP (redirects to HTTPS via nginx)
-ufw allow 443/tcp  # HTTPS
-ufw enable
 ```
