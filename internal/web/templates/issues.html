@@ -1,0 +1,98 @@
+{{template "header" .}}
+<main class="space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-semibold tracking-tight">Issues</h1>
+      <p class="mt-1 text-sm text-slate-400">Grouped issues across all projects.</p>
+    </div>
+
+    <form hx-get="/issues" hx-target="main" hx-select="main" hx-swap="outerHTML"
+          hx-trigger="change" class="flex flex-wrap gap-2">
+      <select name="status"
+        class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 focus:border-emerald-400 focus:outline-none">
+        <option value="" {{if eq .Filter.Status ""}}selected{{end}}>All statuses</option>
+        <option value="open"     {{if eq .Filter.Status "open"}}selected{{end}}>Open</option>
+        <option value="resolved" {{if eq .Filter.Status "resolved"}}selected{{end}}>Resolved</option>
+        <option value="ignored"  {{if eq .Filter.Status "ignored"}}selected{{end}}>Ignored</option>
+      </select>
+      <select name="platform"
+        class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 focus:border-emerald-400 focus:outline-none">
+        <option value="" {{if eq .Filter.Platform ""}}selected{{end}}>All platforms</option>
+        <option value="javascript" {{if eq .Filter.Platform "javascript"}}selected{{end}}>JavaScript</option>
+        <option value="python"     {{if eq .Filter.Platform "python"}}selected{{end}}>Python</option>
+        <option value="php"        {{if eq .Filter.Platform "php"}}selected{{end}}>PHP</option>
+        <option value="go"         {{if eq .Filter.Platform "go"}}selected{{end}}>Go</option>
+        <option value="ruby"       {{if eq .Filter.Platform "ruby"}}selected{{end}}>Ruby</option>
+        <option value="java"       {{if eq .Filter.Platform "java"}}selected{{end}}>Java</option>
+        <option value="node"       {{if eq .Filter.Platform "node"}}selected{{end}}>Node</option>
+        <option value="other"      {{if eq .Filter.Platform "other"}}selected{{end}}>Other</option>
+      </select>
+      {{if .Environments}}
+      <select name="env"
+        class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 focus:border-emerald-400 focus:outline-none">
+        <option value="" {{if eq .Filter.Environment ""}}selected{{end}}>All environments</option>
+        {{range .Environments}}
+        <option value="{{.}}" {{if eq $.Filter.Environment .}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+      {{end}}
+      <select name="level"
+        class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 focus:border-emerald-400 focus:outline-none">
+        <option value="" {{if eq .Filter.Level ""}}selected{{end}}>All levels</option>
+        <option value="fatal"   {{if eq .Filter.Level "fatal"}}selected{{end}}>Fatal</option>
+        <option value="error"   {{if eq .Filter.Level "error"}}selected{{end}}>Error</option>
+        <option value="warning" {{if eq .Filter.Level "warning"}}selected{{end}}>Warning</option>
+        <option value="info"    {{if eq .Filter.Level "info"}}selected{{end}}>Info</option>
+        <option value="debug"   {{if eq .Filter.Level "debug"}}selected{{end}}>Debug</option>
+      </select>
+      {{if or .Filter.Status .Filter.Platform .Filter.Environment .Filter.Level}}
+      <a href="/issues"
+        class="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-slate-500 hover:text-slate-300">
+        Clear
+      </a>
+      {{end}}
+    </form>
+  </div>
+
+  {{if not .Issues}}
+  <section class="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center text-slate-400">
+    {{if or .Filter.Status .Filter.Platform .Filter.Environment .Filter.Level}}
+    No issues match the current filters.
+    {{else}}
+    No issues yet. Send a Sentry event to your DSN and reload this page.
+    {{end}}
+  </section>
+  {{else}}
+  <section class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
+    <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+      <thead class="bg-slate-900/90 text-slate-400">
+        <tr>
+          <th class="px-4 py-3 font-medium">Issue</th>
+          <th class="px-4 py-3 font-medium">Project</th>
+          <th class="px-4 py-3 font-medium">Events</th>
+          <th class="px-4 py-3 font-medium">Last seen</th>
+          <th class="px-4 py-3 font-medium">Status</th>
+          <th class="px-4 py-3 font-medium">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800">
+        {{range .Issues}}
+        {{template "issue-row" .}}
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  {{if .NextCursor}}
+  <div class="flex justify-center">
+    <button
+      hx-get="/issues?status={{.Filter.Status}}&platform={{.Filter.Platform}}&env={{.Filter.Environment}}&level={{.Filter.Level}}&cursor={{.NextCursor}}"
+      hx-target="main" hx-select="main" hx-swap="outerHTML"
+      class="rounded-lg border border-slate-700 px-5 py-2.5 text-sm text-slate-300 hover:border-emerald-400 hover:text-emerald-300">
+      Load more
+    </button>
+  </div>
+  {{end}}
+  {{end}}
+</main>
+{{template "footer" .}}

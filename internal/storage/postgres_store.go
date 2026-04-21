@@ -1,0 +1,539 @@
+package storage
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/Methamorphe/bugrail/internal/config"
+	"github.com/Methamorphe/bugrail/internal/storage/postgresgen"
+)
+
+type postgresStore struct {
+	db      *sql.DB
+	queries *postgresgen.Queries
+}
+
+func newPostgresStore(db *sql.DB) Store {
+	return &postgresStore{
+		db:      db,
+		queries: postgresgen.New(db),
+	}
+}
+
+func (s *postgresStore) Close() error {
+	return s.db.Close()
+}
+
+func (s *postgresStore) Migrate(ctx context.Context) error {
+	return runMigrations(ctx, s.db, config.DriverPostgres)
+}
+
+func (s *postgresStore) Bootstrap(ctx context.Context, params BootstrapParams) (BootstrapResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return BootstrapResult{}, fmt.Errorf("begin bootstrap tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	q := s.queries.WithTx(tx)
+	userCount, err := q.CountUsers(ctx)
+	if err != nil {
+		return BootstrapResult{}, fmt.Errorf("count users: %w", err)
+	}
+	projectCount, err := q.CountProjects(ctx)
+	if err != nil {
+		return BootstrapResult{}, fmt.Errorf("count projects: %w", err)
+	}
+	if userCount > 0 || projectCount > 0 {
+		return BootstrapResult{}, ErrAlreadyInitialized
+	}
+
+	now := unixNow()
+	orgID, err := randomHex(12)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	userID, err := randomHex(12)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	projectKeyID, err := randomHex(12)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	publicKey, err := randomHex(16)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	secretKey, err := randomHex(16)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	projectID := projectNumericID(projectCount)
+
+	if err := q.CreateUser(ctx, postgresgen.CreateUserParams{
+		ID:           userID,
+		Email:        params.AdminEmail,
+		PasswordHash: params.PasswordHash,
+		CreatedAt:    now,
+	}); err != nil {
+		return BootstrapResult{}, fmt.Errorf("create admin user: %w", err)
+	}
+	if err := q.CreateOrganization(ctx, postgresgen.CreateOrganizationParams{
+		ID:        orgID,
+		Slug:      params.OrgSlug,
+		Name:      params.OrgName,
+		CreatedAt: now,
+	}); err != nil {
+		return BootstrapResult{}, fmt.Errorf("create organization: %w", err)
+	}
+	if err := q.CreateProject(ctx, postgresgen.CreateProjectParams{
+		ID:             projectID,
+		OrganizationID: orgID,
+		Slug:           params.ProjectSlug,
+		Name:           params.ProjectName,
+		CreatedAt:      now,
+	}); err != nil {
+		return BootstrapResult{}, fmt.Errorf("create project: %w", err)
+	}
+	if err := q.CreateProjectKey(ctx, postgresgen.CreateProjectKeyParams{
+		ID:        projectKeyID,
+		ProjectID: projectID,
+		PublicKey: publicKey,
+		SecretKey: secretKey,
+		CreatedAt: now,
+	}); err != nil {
+		return BootstrapResult{}, fmt.Errorf("create project key: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return BootstrapResult{}, fmt.Errorf("commit bootstrap tx: %w", err)
+	}
+
+	return BootstrapResult{
+		OrganizationID: orgID,
+		ProjectID:      projectID,
+		PublicKey:      publicKey,
+		SecretKey:      secretKey,
+	}, nil
+}
+
+func (s *postgresStore) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row, err := s.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, fmt.Errorf("get user by email: %w", err)
+	}
+	return User{
+		ID:           row.ID,
+		Email:        row.Email,
+		PasswordHash: row.PasswordHash,
+		CreatedAt:    row.CreatedAt,
+	}, nil
+}
+
+func (s *postgresStore) CreateSession(ctx context.Context, params CreateSessionParams) (Session, error) {
+	sessionID, err := randomHex(12)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := s.queries.CreateSession(ctx, postgresgen.CreateSessionParams{
+		ID:        sessionID,
+		UserID:    params.UserID,
+		TokenHash: params.TokenHash,
+		CreatedAt: params.CreatedAt,
+		ExpiresAt: params.ExpiresAt,
+	}); err != nil {
+		return Session{}, fmt.Errorf("create session: %w", err)
+	}
+	return s.GetSessionByTokenHash(ctx, params.TokenHash)
+}
+
+func (s *postgresStore) GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error) {
+	row, err := s.queries.GetSessionByTokenHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Session{}, ErrNotFound
+		}
+		return Session{}, fmt.Errorf("get session by token hash: %w", err)
+	}
+	return Session{
+		ID:        row.ID,
+		UserID:    row.UserID,
+		Email:     row.Email,
+		TokenHash: row.TokenHash,
+		CreatedAt: row.CreatedAt,
+		ExpiresAt: row.ExpiresAt,
+	}, nil
+}
+
+func (s *postgresStore) DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error {
+	if err := s.queries.DeleteSessionByTokenHash(ctx, tokenHash); err != nil {
+		return fmt.Errorf("delete session by token hash: %w", err)
+	}
+	return nil
+}
+
+func (s *postgresStore) DeleteExpiredSessions(ctx context.Context, now int64) error {
+	if err := s.queries.DeleteExpiredSessions(ctx, now); err != nil {
+		return fmt.Errorf("delete expired sessions: %w", err)
+	}
+	return nil
+}
+
+func (s *postgresStore) AuthenticateProjectKey(ctx context.Context, projectID, publicKey string) (ProjectRef, error) {
+	row, err := s.queries.GetProjectKeyByPublicKey(ctx, postgresgen.GetProjectKeyByPublicKeyParams{
+		ProjectID: projectID,
+		PublicKey: publicKey,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ProjectRef{}, ErrNotFound
+		}
+		return ProjectRef{}, fmt.Errorf("get project key: %w", err)
+	}
+	return ProjectRef{
+		ProjectID:   row.ProjectID,
+		ProjectName: row.ProjectName,
+		PublicKey:   row.PublicKey,
+	}, nil
+}
+
+func (s *postgresStore) UpdateIssueStatus(ctx context.Context, issueID, status string, updatedAt int64) error {
+	if err := s.queries.UpdateIssueStatus(ctx, postgresgen.UpdateIssueStatusParams{
+		ID:        issueID,
+		Status:    status,
+		UpdatedAt: updatedAt,
+	}); err != nil {
+		return fmt.Errorf("update issue status: %w", err)
+	}
+	return nil
+}
+
+func (s *postgresStore) RecordProcessedEvent(ctx context.Context, params RecordProcessedEventParams) (RecordProcessedEventResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RecordProcessedEventResult{}, fmt.Errorf("begin record event tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	q := s.queries.WithTx(tx)
+	existingEvent, err := q.GetEventByProjectAndEventID(ctx, postgresgen.GetEventByProjectAndEventIDParams{
+		ProjectID: params.ProjectID,
+		EventID:   params.EventID,
+	})
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return RecordProcessedEventResult{}, fmt.Errorf("commit duplicate event tx: %w", err)
+		}
+		return RecordProcessedEventResult{
+			IssueID:   existingEvent.IssueID,
+			EventID:   existingEvent.EventID,
+			Duplicate: true,
+		}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return RecordProcessedEventResult{}, fmt.Errorf("lookup existing event: %w", err)
+	}
+
+	issue, err := q.GetIssueByGroupingKey(ctx, postgresgen.GetIssueByGroupingKeyParams{
+		ProjectID:   params.ProjectID,
+		GroupingKey: params.GroupingKey,
+	})
+	now := params.ReceivedAt
+	newIssue := false
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return RecordProcessedEventResult{}, fmt.Errorf("lookup issue by grouping key: %w", err)
+		}
+		newIssue = true
+
+		issueID, idErr := randomHex(12)
+		if idErr != nil {
+			return RecordProcessedEventResult{}, idErr
+		}
+		if err := q.CreateIssue(ctx, postgresgen.CreateIssueParams{
+			ID:          issueID,
+			ProjectID:   params.ProjectID,
+			GroupingKey: params.GroupingKey,
+			Title:       params.IssueTitle,
+			Culprit:     params.Culprit,
+			Platform:    params.Platform,
+			Environment: params.Environment,
+			Level:       params.Level,
+			Status:      "open",
+			FirstSeenAt: now,
+			LastSeenAt:  now,
+			EventCount:  1,
+			LastEventID: params.EventID,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}); err != nil {
+			return RecordProcessedEventResult{}, fmt.Errorf("create issue: %w", err)
+		}
+		issue = postgresgen.Issue{ID: issueID}
+	} else {
+		if err := q.UpdateIssueAfterEvent(ctx, postgresgen.UpdateIssueAfterEventParams{
+			Title:       params.IssueTitle,
+			Culprit:     params.Culprit,
+			Platform:    params.Platform,
+			Environment: params.Environment,
+			Level:       params.Level,
+			LastSeenAt:  now,
+			EventCount:  issue.EventCount + 1,
+			LastEventID: params.EventID,
+			UpdatedAt:   now,
+			ID:          issue.ID,
+		}); err != nil {
+			return RecordProcessedEventResult{}, fmt.Errorf("update issue after event: %w", err)
+		}
+	}
+
+	eventRowID, err := randomHex(12)
+	if err != nil {
+		return RecordProcessedEventResult{}, err
+	}
+	if err := q.CreateEvent(ctx, postgresgen.CreateEventParams{
+		ID:             eventRowID,
+		IssueID:        issue.ID,
+		ProjectID:      params.ProjectID,
+		EventID:        params.EventID,
+		Platform:       params.Platform,
+		Environment:    params.Environment,
+		Release:        params.Release,
+		Level:          params.Level,
+		Title:          params.IssueTitle,
+		Culprit:        params.Culprit,
+		ExceptionType:  params.ExceptionType,
+		ExceptionValue: params.ExceptionValue,
+		Fingerprint:    params.Fingerprint,
+		Payload:        params.Payload,
+		ReceivedAt:     now,
+	}); err != nil {
+		if isDuplicateConstraint(err) {
+			if err := tx.Commit(); err != nil {
+				return RecordProcessedEventResult{}, fmt.Errorf("commit duplicate create event tx: %w", err)
+			}
+			return RecordProcessedEventResult{
+				IssueID:   issue.ID,
+				EventID:   params.EventID,
+				Duplicate: true,
+			}, nil
+		}
+		return RecordProcessedEventResult{}, fmt.Errorf("create event: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return RecordProcessedEventResult{}, fmt.Errorf("commit record event tx: %w", err)
+	}
+	return RecordProcessedEventResult{
+		IssueID:  issue.ID,
+		EventID:  params.EventID,
+		NewIssue: newIssue,
+	}, nil
+}
+
+func (s *postgresStore) ListIssues(ctx context.Context, filter ListIssuesFilter, limit int) ([]IssueSummary, error) {
+	// Dynamic WHERE: sqlc cannot express optional filter columns, so the query is built here.
+	q := `SELECT i.id, i.project_id, p.name AS project_name, i.title, i.culprit,
+	       i.platform, i.environment, i.level, i.status, i.first_seen_at, i.last_seen_at,
+	       i.event_count, i.last_event_id
+	      FROM issues AS i JOIN projects AS p ON p.id = i.project_id WHERE 1=1`
+	var args []any
+	n := 1
+	if filter.Status != "" {
+		q += fmt.Sprintf(" AND i.status = $%d", n)
+		args = append(args, filter.Status)
+		n++
+	}
+	if filter.Platform != "" {
+		q += fmt.Sprintf(" AND i.platform = $%d", n)
+		args = append(args, filter.Platform)
+		n++
+	}
+	if filter.Environment != "" {
+		q += fmt.Sprintf(" AND i.environment = $%d", n)
+		args = append(args, filter.Environment)
+		n++
+	}
+	if filter.Level != "" {
+		q += fmt.Sprintf(" AND i.level = $%d", n)
+		args = append(args, filter.Level)
+		n++
+	}
+	if filter.Cursor > 0 {
+		q += fmt.Sprintf(" AND i.last_seen_at < $%d", n)
+		args = append(args, filter.Cursor)
+		n++
+	}
+	q += fmt.Sprintf(" ORDER BY i.last_seen_at DESC LIMIT $%d", n)
+	args = append(args, normalizeLimit32(limit, 50))
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list issues: %w", err)
+	}
+	defer rows.Close()
+	var items []IssueSummary
+	for rows.Next() {
+		var i IssueSummary
+		if err := rows.Scan(&i.ID, &i.ProjectID, &i.ProjectName, &i.Title, &i.Culprit,
+			&i.Platform, &i.Environment, &i.Level, &i.Status, &i.FirstSeenAt, &i.LastSeenAt,
+			&i.EventCount, &i.LastEventID); err != nil {
+			return nil, fmt.Errorf("scan issue row: %w", err)
+		}
+		items = append(items, i)
+	}
+	return items, rows.Err()
+}
+
+func (s *postgresStore) StoreAttachment(ctx context.Context, p AttachmentParams) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO attachments (id, event_id, project_id, filename, content_type, size, data, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		p.ID, p.EventID, p.ProjectID, p.Filename, p.ContentType, len(p.Data), p.Data, p.CreatedAt,
+	)
+	return err
+}
+
+func (s *postgresStore) ListAttachmentsByEventID(ctx context.Context, eventID string) ([]AttachmentMeta, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, event_id, filename, content_type, size FROM attachments WHERE event_id = $1 ORDER BY created_at`,
+		eventID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list attachments: %w", err)
+	}
+	defer rows.Close()
+	var out []AttachmentMeta
+	for rows.Next() {
+		var a AttachmentMeta
+		if err := rows.Scan(&a.ID, &a.EventID, &a.Filename, &a.ContentType, &a.Size); err != nil {
+			return nil, fmt.Errorf("scan attachment: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *postgresStore) GetAttachmentData(ctx context.Context, attachmentID string) ([]byte, string, error) {
+	var data []byte
+	var ct string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT data, content_type FROM attachments WHERE id = $1`, attachmentID,
+	).Scan(&data, &ct)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", ErrNotFound
+		}
+		return nil, "", fmt.Errorf("get attachment: %w", err)
+	}
+	return data, ct, nil
+}
+
+func (s *postgresStore) ListDistinctEnvironments(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT environment FROM issues WHERE environment != '' ORDER BY environment`)
+	if err != nil {
+		return nil, fmt.Errorf("list environments: %w", err)
+	}
+	defer rows.Close()
+	var envs []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, fmt.Errorf("scan environment: %w", err)
+		}
+		envs = append(envs, e)
+	}
+	return envs, rows.Err()
+}
+
+func (s *postgresStore) StoreSourceMap(ctx context.Context, p SourceMapParams) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO source_maps (id, project_id, release, filename, content, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT(project_id, release, filename) DO UPDATE SET content = EXCLUDED.content`,
+		p.ID, p.ProjectID, p.Release, p.Filename, p.Content, p.CreatedAt,
+	)
+	return err
+}
+
+func (s *postgresStore) GetSourceMap(ctx context.Context, projectID, release, filename string) (string, error) {
+	var content string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT content FROM source_maps WHERE project_id = $1 AND release = $2 AND filename = $3`,
+		projectID, release, filename,
+	).Scan(&content)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("get source map: %w", err)
+	}
+	return content, nil
+}
+
+func (s *postgresStore) GetIssue(ctx context.Context, issueID string) (IssueDetail, error) {
+	row, err := s.queries.GetIssueByID(ctx, issueID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return IssueDetail{}, ErrNotFound
+		}
+		return IssueDetail{}, fmt.Errorf("get issue: %w", err)
+	}
+	return IssueDetail{
+		IssueSummary: IssueSummary{
+			ID:          row.ID,
+			ProjectID:   row.ProjectID,
+			ProjectName: row.ProjectName,
+			Title:       row.Title,
+			Culprit:     row.Culprit,
+			Platform:    row.Platform,
+			Environment: row.Environment,
+			Status:      row.Status,
+			FirstSeenAt: row.FirstSeenAt,
+			LastSeenAt:  row.LastSeenAt,
+			EventCount:  row.EventCount,
+			LastEventID: row.LastEventID,
+		},
+		GroupingKey: row.GroupingKey,
+	}, nil
+}
+
+func (s *postgresStore) ListEventsByIssue(ctx context.Context, issueID string, limit int) ([]EventRecord, error) {
+	rows, err := s.queries.ListEventsByIssue(ctx, postgresgen.ListEventsByIssueParams{
+		IssueID:    issueID,
+		LimitCount: normalizeLimit32(limit, 50),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list events by issue: %w", err)
+	}
+	items := make([]EventRecord, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, EventRecord{
+			ID:             row.ID,
+			IssueID:        row.IssueID,
+			ProjectID:      row.ProjectID,
+			EventID:        row.EventID,
+			Platform:       row.Platform,
+			Environment:    row.Environment,
+			Release:        row.Release,
+			Level:          row.Level,
+			Title:          row.Title,
+			Culprit:        row.Culprit,
+			ExceptionType:  row.ExceptionType,
+			ExceptionValue: row.ExceptionValue,
+			Fingerprint:    row.Fingerprint,
+			Payload:        row.Payload,
+			ReceivedAt:     row.ReceivedAt,
+		})
+	}
+	return items, nil
+}

@@ -1,0 +1,27 @@
+version: "2"
+
+sql:
+  - engine: sqlite
+    schema:
+      - migrations/*.sql
+    queries:
+      - internal/storage/queries/*.sql
+    gen:
+      go:
+        package: sqlitegen
+        out: internal/storage/sqlitegen
+        sql_package: database/sql
+        emit_json_tags: false
+        emit_interface: false
+  - engine: postgresql
+    schema:
+      - migrations/*.sql
+    queries:
+      - internal/storage/queries/*.sql
+    gen:
+      go:
+        package: postgresgen
+        out: internal/storage/postgresgen
+        sql_package: database/sql
+        emit_json_tags: false
+        emit_interface: false

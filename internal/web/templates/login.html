@@ -1,0 +1,21 @@
+{{template "header" .}}
+<main class="mx-auto max-w-md rounded-2xl border border-slate-800 bg-slate-900/80 p-8 shadow-2xl shadow-slate-950/30">
+  <h1 class="text-3xl font-semibold tracking-tight">Login</h1>
+  <p class="mt-2 text-sm text-slate-400">Use the admin credentials created during <code>bugrail init</code>.</p>
+  {{if .Error}}
+  <div class="mt-6 rounded-lg border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">{{.Error}}</div>
+  {{end}}
+  <form method="post" action="/login" class="mt-6 space-y-4">
+    <input type="hidden" name="{{.CSRFField}}" value="{{.CSRFToken}}">
+    <label class="block text-sm text-slate-300">
+      <span class="mb-2 block">Email</span>
+      <input name="email" type="email" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-emerald-400">
+    </label>
+    <label class="block text-sm text-slate-300">
+      <span class="mb-2 block">Password</span>
+      <input name="password" type="password" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-emerald-400">
+    </label>
+    <button type="submit" class="w-full rounded-lg bg-emerald-400 px-4 py-3 font-medium text-slate-950 hover:bg-emerald-300">Sign in</button>
+  </form>
+</main>
+{{template "footer" .}}

@@ -1,0 +1,52 @@
+{{template "header" .}}
+<main class="space-y-8">
+  <section class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+    <a href="/issues" class="text-sm text-emerald-300 hover:text-emerald-200">← Back to issues</a>
+    <div class="mt-3 flex flex-wrap items-start justify-between gap-4">
+      <h1 class="text-3xl font-semibold tracking-tight">{{.Issue.Title}}</h1>
+      {{template "issue-actions" .Issue}}
+    </div>
+    <div class="mt-4 grid gap-4 text-sm text-slate-300 md:grid-cols-4">
+      <div><span class="block text-slate-500">Project</span>{{.Issue.ProjectName}}</div>
+      <div><span class="block text-slate-500">Events</span>{{.Issue.EventCount}}</div>
+      <div><span class="block text-slate-500">First seen</span>{{formatUnix .Issue.FirstSeenAt}}</div>
+      <div><span class="block text-slate-500">Last seen</span>{{formatUnix .Issue.LastSeenAt}}</div>
+    </div>
+    {{if .Issue.Culprit}}
+    <div class="mt-4 text-sm text-slate-400">{{.Issue.Culprit}}</div>
+    {{end}}
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-xl font-semibold tracking-tight">Recent events</h2>
+    {{range .Events}}
+    <article class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="font-medium text-slate-100">{{.Title}}</h3>
+          <p class="mt-1 text-xs text-slate-400">{{.EventID}} · {{.Level}} · {{formatUnix .ReceivedAt}}</p>
+        </div>
+        <div class="text-xs text-slate-500">{{.Platform}} · {{.Environment}}</div>
+      </div>
+      {{if .ExceptionType}}
+      <div class="mt-4 rounded-lg bg-slate-950/70 px-4 py-3 text-sm text-slate-300">
+        <span class="font-medium text-rose-300">{{.ExceptionType}}</span>
+        {{if .ExceptionValue}}: {{.ExceptionValue}}{{end}}
+      </div>
+      {{end}}
+      {{template "breadcrumbs" .Payload}}
+      {{template "event-context" .Payload}}
+      {{template "stacktrace" .Frames}}
+      <div x-data="{showRaw: false}" class="mt-4">
+        <button @click="showRaw = !showRaw"
+                x-text="showRaw ? 'Hide raw payload' : 'Show raw payload'"
+                class="text-xs text-slate-500 transition-colors hover:text-slate-300"></button>
+        <pre x-show="showRaw" x-cloak
+             class="mt-2 overflow-x-auto rounded-xl bg-slate-950 p-4 text-xs leading-6 text-slate-300">{{prettyJSON .Payload}}</pre>
+      </div>
+      {{template "attachments" .Attachments}}
+    </article>
+    {{end}}
+  </section>
+</main>
+{{template "footer" .}}

@@ -1,0 +1,3 @@
+{"event_id":"py-event-1"}
+{"type":"event"}
+{"event_id":"py-event-1","platform":"python","environment":"production","level":"error","message":"worker crashed","exception":{"values":[{"type":"ValueError","value":"bad payload"}]}}

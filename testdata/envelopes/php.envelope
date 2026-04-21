@@ -1,0 +1,3 @@
+{"event_id":"php-event-1"}
+{"type":"event"}
+{"event_id":"php-event-1","platform":"php","environment":"production","level":"error","message":"mailer exploded","exception":{"values":[{"type":"RuntimeException","value":"SMTP rejected recipient"}]}}

@@ -2,3 +2,6 @@
 .data/
 dist/
 coverage.out
+
+/bugrail
+/seed

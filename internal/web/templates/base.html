@@ -1,0 +1,69 @@
+{{define "header"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · Bugrail</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <style>[x-cloak]{display:none!important}</style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div class="mx-auto max-w-6xl px-6 py-8">
+    <header class="mb-10 flex items-center justify-between border-b border-slate-800 pb-4">
+      <div>
+        <a href="/issues" class="text-2xl font-semibold tracking-tight text-emerald-300">Bugrail</a>
+        <p class="mt-1 text-sm text-slate-400">Self-hosted error tracking, first vertical slice.</p>
+      </div>
+      {{if .User}}
+      <div class="flex items-center gap-4 text-sm text-slate-300">
+        <span>{{.User.Email}}</span>
+        <form method="post" action="/logout">
+          <input type="hidden" name="{{.CSRFField}}" value="{{.CSRFToken}}">
+          <button type="submit" class="rounded-md border border-slate-700 px-3 py-2 text-slate-100 hover:border-emerald-400 hover:text-emerald-300">Logout</button>
+        </form>
+      </div>
+      {{end}}
+    </header>
+{{end}}
+
+{{define "footer"}}
+  </div>
+{{if .User}}
+<script>
+(function () {
+  // Send CSRF token via header for HTMX requests.
+  document.addEventListener('htmx:configRequest', function (e) {
+    var cookie = document.cookie.split(';').find(function (c) {
+      return c.trim().startsWith('bugrail_csrf=');
+    });
+    if (cookie) {
+      e.detail.headers['X-CSRF-Token'] = cookie.split('=')[1].trim();
+    }
+  });
+
+  // SSE: refresh current page content when issues change.
+  var es = new EventSource('/stream');
+  es.onmessage = function () {
+    fetch(window.location.href, {credentials: 'same-origin'})
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        if (!html) return;
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var next = doc.querySelector('main');
+        var cur = document.querySelector('main');
+        if (next && cur) {
+          cur.replaceWith(next);
+          htmx.process(document.querySelector('main'));
+        }
+      })
+      .catch(function () {});
+  };
+})();
+</script>
+{{end}}
+</body>
+</html>
+{{end}}

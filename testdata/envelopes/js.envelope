@@ -1,0 +1,3 @@
+{"event_id":"js-event-1"}
+{"type":"event"}
+{"event_id":"js-event-1","platform":"javascript","environment":"production","level":"error","message":"checkout failed","exception":{"values":[{"type":"TypeError","value":"Cannot read properties of undefined"}]}}

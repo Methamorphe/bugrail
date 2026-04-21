@@ -1,0 +1,183 @@
+{{define "stacktrace"}}
+{{$frames := .}}
+{{if $frames}}
+<div x-data="{showAll: false}" class="mt-4">
+  <div class="mb-2 flex items-center justify-between">
+    <span class="text-xs font-medium uppercase tracking-wide text-slate-500">Stack trace</span>
+    <button x-cloak @click="showAll = !showAll"
+            x-text="showAll ? 'Hide library frames' : 'Show library frames'"
+            class="text-xs text-slate-500 transition-colors hover:text-slate-300"></button>
+  </div>
+  <div class="divide-y divide-slate-800/40 overflow-hidden rounded-xl bg-slate-950 font-mono text-xs">
+    {{range $frames}}
+    <div x-show="{{.InApp}} || showAll"
+         class="px-4 py-2.5{{if not .InApp}} opacity-40{{end}}">
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        {{if .InApp}}<span class="rounded px-1.5 py-0.5 font-sans text-[10px] ring-1 bg-emerald-950/60 text-emerald-400 ring-emerald-500/30">in-app</span>{{end}}
+        <span class="font-medium text-slate-200">{{or .Function "anonymous"}}</span>
+        <span class="text-slate-500 break-all">
+          {{if .Filename}}{{.Filename}}{{else if .AbsPath}}{{.AbsPath}}{{else if .Module}}{{.Module}}{{end}}{{if .Lineno}}:{{.Lineno}}{{end}}
+        </span>
+      </div>
+      {{if and .InApp .ContextLine}}
+      <div class="mt-2 space-y-0.5 border-l-2 border-slate-700 pl-3 text-[11px]">
+        {{range .PreContext}}<div class="text-slate-600">{{.}}</div>{{end}}
+        <div class="text-amber-300">{{.ContextLine}}</div>
+        {{range .PostContext}}<div class="text-slate-600">{{.}}</div>{{end}}
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{define "status-badge"}}
+{{if eq . "open"}}
+<span class="inline-flex items-center rounded-full bg-rose-950/60 px-2 py-0.5 text-xs font-medium text-rose-300 ring-1 ring-rose-500/40">open</span>
+{{else if eq . "resolved"}}
+<span class="inline-flex items-center rounded-full bg-emerald-950/60 px-2 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-emerald-500/40">resolved</span>
+{{else if eq . "ignored"}}
+<span class="inline-flex items-center rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-400 ring-1 ring-slate-600/40">ignored</span>
+{{end}}
+{{end}}
+
+{{define "issue-row"}}
+<tr id="issue-{{.ID}}" class="hover:bg-slate-800/40">
+  <td class="px-4 py-4 align-top">
+    <a href="/issues/{{.ID}}" class="font-medium text-slate-100 hover:text-emerald-300">{{.Title}}</a>
+    <div class="mt-1 text-xs text-slate-400">{{.Platform}} · {{.Environment}}</div>
+    {{if .Culprit}}<div class="mt-1 text-xs text-slate-500">{{.Culprit}}</div>{{end}}
+  </td>
+  <td class="px-4 py-4 align-top text-slate-300">{{.ProjectName}}</td>
+  <td class="px-4 py-4 align-top text-slate-300">{{.EventCount}}</td>
+  <td class="px-4 py-4 align-top text-slate-300">{{formatUnix .LastSeenAt}}</td>
+  <td class="px-4 py-4 align-top">{{template "status-badge" .Status}}</td>
+  <td class="px-4 py-4 align-top">
+    <div class="flex gap-2">
+      {{if eq .Status "open"}}
+      <button hx-post="/issues/{{.ID}}/resolve" hx-target="#issue-{{.ID}}" hx-swap="outerHTML"
+        class="rounded border border-emerald-700/50 px-2 py-1 text-xs text-emerald-300 hover:border-emerald-400 hover:bg-emerald-950/40">Resolve</button>
+      <button hx-post="/issues/{{.ID}}/ignore" hx-target="#issue-{{.ID}}" hx-swap="outerHTML"
+        class="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-slate-500 hover:bg-slate-800/40">Ignore</button>
+      {{else}}
+      <button hx-post="/issues/{{.ID}}/reopen" hx-target="#issue-{{.ID}}" hx-swap="outerHTML"
+        class="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-slate-500 hover:bg-slate-800/40">Reopen</button>
+      {{end}}
+    </div>
+  </td>
+</tr>
+{{end}}
+
+{{define "issue-actions"}}
+<div id="issue-actions" class="flex flex-wrap items-center gap-3">
+  {{template "status-badge" .Status}}
+  {{if eq .Status "open"}}
+  <button hx-post="/issues/{{.ID}}/resolve?ctx=detail" hx-target="#issue-actions" hx-swap="outerHTML"
+    class="rounded-md border border-emerald-700/50 px-3 py-1.5 text-sm text-emerald-300 hover:border-emerald-400 hover:bg-emerald-950/40">Resolve</button>
+  <button hx-post="/issues/{{.ID}}/ignore?ctx=detail" hx-target="#issue-actions" hx-swap="outerHTML"
+    class="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-400 hover:border-slate-500 hover:bg-slate-800/40">Ignore</button>
+  {{else}}
+  <button hx-post="/issues/{{.ID}}/reopen?ctx=detail" hx-target="#issue-actions" hx-swap="outerHTML"
+    class="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-400 hover:border-slate-500 hover:bg-slate-800/40">Reopen</button>
+  {{end}}
+</div>
+{{end}}
+
+{{define "event-context"}}
+{{$ctx := parseEventContext .}}
+{{if $ctx}}
+<div class="mt-4 space-y-3">
+
+  {{if $ctx.Request}}
+  <div class="rounded-xl bg-slate-950 p-4 text-xs font-mono">
+    <div class="mb-2 text-[10px] font-sans font-medium uppercase tracking-wide text-slate-500">HTTP Request</div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-slate-300">
+      {{if $ctx.Request.Method}}<span class="font-medium text-emerald-400">{{$ctx.Request.Method}}</span>{{end}}
+      {{if $ctx.Request.URL}}<span class="break-all text-slate-200">{{$ctx.Request.URL}}</span>{{end}}
+      {{if $ctx.Request.QueryString}}<span class="text-slate-500">?{{$ctx.Request.QueryString}}</span>{{end}}
+    </div>
+    {{if $ctx.Request.Headers}}
+    <div class="mt-2 space-y-0.5 border-t border-slate-800 pt-2">
+      {{range $ctx.Request.Headers}}
+      <div class="flex gap-2">
+        <span class="w-40 shrink-0 text-slate-500">{{.Key}}</span>
+        <span class="break-all text-slate-400">{{.Value}}</span>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if $ctx.User}}
+  <div class="rounded-xl bg-slate-950 p-4 text-xs font-mono">
+    <div class="mb-2 text-[10px] font-sans font-medium uppercase tracking-wide text-slate-500">User</div>
+    <div class="space-y-0.5">
+      {{if $ctx.User.ID}}<div class="flex gap-2"><span class="w-24 shrink-0 text-slate-500">id</span><span class="text-slate-300">{{$ctx.User.ID}}</span></div>{{end}}
+      {{if $ctx.User.Email}}<div class="flex gap-2"><span class="w-24 shrink-0 text-slate-500">email</span><span class="text-slate-300">{{$ctx.User.Email}}</span></div>{{end}}
+      {{if $ctx.User.Username}}<div class="flex gap-2"><span class="w-24 shrink-0 text-slate-500">username</span><span class="text-slate-300">{{$ctx.User.Username}}</span></div>{{end}}
+      {{if $ctx.User.IPAddress}}<div class="flex gap-2"><span class="w-24 shrink-0 text-slate-500">ip</span><span class="text-slate-300">{{$ctx.User.IPAddress}}</span></div>{{end}}
+    </div>
+  </div>
+  {{end}}
+
+  {{if $ctx.Tags}}
+  <div class="rounded-xl bg-slate-950 p-4 text-xs">
+    <div class="mb-2 text-[10px] font-sans font-medium uppercase tracking-wide text-slate-500">Tags</div>
+    <div class="flex flex-wrap gap-2">
+      {{range $ctx.Tags}}
+      <span class="inline-flex items-center gap-1 rounded bg-slate-800 px-2 py-0.5 font-mono ring-1 ring-slate-700/50">
+        <span class="text-slate-400">{{.Key}}</span>
+        <span class="text-slate-200">{{.Value}}</span>
+      </span>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+</div>
+{{end}}
+{{end}}
+
+{{define "breadcrumbs"}}
+{{$crumbs := parseBreadcrumbs .}}
+{{if $crumbs}}
+<div x-data="{open: false}" class="mt-4">
+  <button @click="open = !open"
+          class="flex items-center gap-1.5 text-xs text-slate-500 transition-colors hover:text-slate-300">
+    <span x-text="open ? '▾' : '▸'">▸</span>
+    <span>Breadcrumbs ({{len $crumbs}})</span>
+  </button>
+  <div x-show="open" x-cloak class="mt-2 divide-y divide-slate-800/40 overflow-hidden rounded-xl bg-slate-950 font-mono text-xs">
+    {{range $crumbs}}
+    <div class="flex gap-3 px-4 py-2">
+      <span class="w-48 shrink-0 truncate text-slate-600">{{.Timestamp}}</span>
+      {{if .Category}}<span class="w-28 shrink-0 truncate text-slate-500">{{.Category}}</span>{{end}}
+      <span class="flex-1 {{if eq .Level "error"}}text-rose-400{{else if eq .Level "warning"}}text-amber-400{{else if eq .Level "debug"}}text-slate-600{{else}}text-slate-300{{end}}">
+        {{or .Message "(no message)"}}
+      </span>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{define "attachments"}}
+{{if .}}
+<div class="mt-4">
+  <div class="mb-1.5 text-[10px] font-sans font-medium uppercase tracking-wide text-slate-500">Attachments</div>
+  <div class="flex flex-wrap gap-2">
+    {{range .}}
+    <a href="/attachments/{{.ID}}"
+       class="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300">
+      <span class="text-slate-300">{{or .Filename "attachment"}}</span>
+      <span class="text-slate-600">({{.Size}} B)</span>
+    </a>
+    {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
