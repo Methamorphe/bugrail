@@ -8,18 +8,17 @@ Sentry-compatible ingestion, event grouping, issue list + detail UI, session aut
 ### Jalon 2 — Usable daily
 Issue lifecycle (resolve / ignore / reopen), filters + cursor pagination, stack trace rendering, event context (user, request, tags), rate limiting (token bucket, 429 + `X-Sentry-Rate-Limits`), ntfy + webhook notifications.
 
+### Jalon 3 — Observability quality
+Source maps for JavaScript (frame remapping), breadcrumbs display, level + environment filters, attachments (stored as blobs, downloadable).
+
+### Jalon 4 — Readable at a glance
+Dashboard with stat cards and SVG event-volume chart, releases page, persistent navigation, issue text search.
+
 ---
 
 ## Next
 
-### Jalon 3 — Observability quality
-- Source maps for JavaScript (upload endpoint + frame remapping)
-- Breadcrumbs display in event detail
-- `level` filter on issues list
-- Environment filter surfaced in UI (currently accepted but not shown as a selector)
-- Attachments (screenshots, log files) — store as blobs, link from event detail
-
-### Jalon 4 — Operations
+### Jalon 5 — Operations
 - Email notifications (SMTP, configurable per-project)
 - Notifier management UI (add/remove ntfy and webhook targets without restart)
 - `bugrail export` — dump all issues/events to JSON for migration

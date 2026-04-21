@@ -6,6 +6,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Dashboard: stat cards (open issues, fatal open, events/24h, resolved/7d), inline SVG event-volume chart (14 days), breakdowns by level and platform, top 5 open issues
+- Releases page (`GET /releases`): error activity grouped by application release version — issue count, event count, last activity
+- Issue text search: live search on title and culprit via `?q=` query param (HTMX debounced input, 400ms delay)
+- Persistent navigation bar on all authenticated pages: Dashboard, Issues, Releases links with active-state highlighting, email + logout on the right
+
+### Changed
+- Root `/` now renders the dashboard (instead of redirecting to `/issues`)
+- Post-login redirect goes to `/` (dashboard) instead of `/issues`
+
+---
+
+### Added (Jalon 3)
 - Issue lifecycle: resolve, ignore, reopen via HTMX partial updates (no full page reload)
 - Issues list: filter by status and platform, cursor-based pagination (50 per page)
 - Real-time updates: SSE hub pushes `refresh` events; page content swapped in-place
