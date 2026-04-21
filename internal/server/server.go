@@ -39,6 +39,7 @@ func New(store storage.Store, logger *slog.Logger, rateLimitPerProject int, base
 	webMux.Handle("POST /issues/{id}/reopen", authService.RequireUser(http.HandlerFunc(webHandler.HandleIssueStatus)))
 	webMux.Handle("GET /stream", authService.RequireUser(http.HandlerFunc(webHandler.HandleStream)))
 	webMux.Handle("GET /attachments/{attachment_id}", authService.RequireUser(http.HandlerFunc(webHandler.HandleAttachment)))
+	webMux.Handle("GET /releases", authService.RequireUser(http.HandlerFunc(webHandler.HandleReleases)))
 
 	root := http.NewServeMux()
 	root.HandleFunc("POST /api/{project_id}/envelope/", ingestHandler.HandleEnvelope)

@@ -24,6 +24,7 @@ type eventView struct {
 
 type pageData struct {
 	Title        string
+	ActivePage   string
 	CSRFField    string
 	CSRFToken    string
 	User         *auth.User
@@ -35,6 +36,9 @@ type pageData struct {
 	Filter       storage.ListIssuesFilter
 	NextCursor   int64
 	Environments []string
+	Stats        storage.DashboardStats
+	EventVolume  []storage.DayCount
+	Releases     []storage.ReleaseStat
 }
 
 // Handler renders the HTML application.
@@ -61,13 +65,41 @@ func New(store storage.Store, authService auth.Service, logger *slog.Logger, h *
 	}, nil
 }
 
-// HandleRoot redirects to the authenticated or anonymous landing page.
+// HandleRoot renders the dashboard for authenticated users or redirects to login.
 func (h Handler) HandleRoot(w http.ResponseWriter, r *http.Request) {
-	if _, ok := auth.CurrentUser(r.Context()); ok {
-		http.Redirect(w, r, "/issues", http.StatusSeeOther)
+	if _, ok := auth.CurrentUser(r.Context()); !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	h.HandleDashboard(w, r)
+}
+
+// HandleDashboard renders the overview page with stats, chart, and top issues.
+func (h Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.store.GetDashboardStats(r.Context())
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "get dashboard stats failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	volume, err := h.store.GetEventVolumeByDay(r.Context(), 14)
+	if err != nil {
+		h.logger.WarnContext(r.Context(), "get event volume failed", "err", err)
+	}
+	topIssues, err := h.store.ListIssues(r.Context(), storage.ListIssuesFilter{Status: "open"}, 5)
+	if err != nil {
+		h.logger.WarnContext(r.Context(), "get top issues failed", "err", err)
+	}
+	h.render(w, r, "dashboard.html", pageData{
+		Title:       "Dashboard",
+		ActivePage:  "dashboard",
+		User:        currentUser(r),
+		CSRFField:   auth.CSRFFieldName(),
+		CSRFToken:   auth.CSRFToken(r.Context()),
+		Stats:       stats,
+		EventVolume: volume,
+		Issues:      topIssues,
+	})
 }
 
 // HandleLogin renders and processes the login form.
@@ -100,7 +132,7 @@ func (h Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		http.Redirect(w, r, "/issues", http.StatusSeeOther)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -126,6 +158,7 @@ func (h Handler) HandleIssues(w http.ResponseWriter, r *http.Request) {
 		Platform:    q.Get("platform"),
 		Environment: q.Get("env"),
 		Level:       q.Get("level"),
+		Search:      q.Get("q"),
 	}
 	if c := q.Get("cursor"); c != "" {
 		if v, err := strconv.ParseInt(c, 10, 64); err == nil {
@@ -153,6 +186,7 @@ func (h Handler) HandleIssues(w http.ResponseWriter, r *http.Request) {
 
 	h.render(w, r, "issues.html", pageData{
 		Title:        "Issues",
+		ActivePage:   "issues",
 		CSRFField:    auth.CSRFFieldName(),
 		CSRFToken:    auth.CSRFToken(r.Context()),
 		User:         currentUser(r),
@@ -265,6 +299,24 @@ func (h Handler) HandleIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderPartial(w, "issue-row", issue.IssueSummary)
+}
+
+// HandleReleases renders the releases overview page.
+func (h Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
+	releases, err := h.store.ListReleaseStats(r.Context())
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "list release stats failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	h.render(w, r, "releases.html", pageData{
+		Title:      "Releases",
+		ActivePage: "releases",
+		CSRFField:  auth.CSRFFieldName(),
+		CSRFToken:  auth.CSRFToken(r.Context()),
+		User:       currentUser(r),
+		Releases:   releases,
+	})
 }
 
 // HandleStream streams SSE notifications to the browser whenever issues change.

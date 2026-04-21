@@ -7,7 +7,10 @@
     </div>
 
     <form hx-get="/issues" hx-target="main" hx-select="main" hx-swap="outerHTML"
-          hx-trigger="change" class="flex flex-wrap gap-2">
+          hx-trigger="change, input delay:400ms from:input[name='q']" class="flex flex-wrap gap-2">
+      <input type="search" name="q" value="{{.Filter.Search}}"
+             placeholder="Search issues…"
+             class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 placeholder-slate-600 focus:border-emerald-400 focus:outline-none w-52">
       <select name="status"
         class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 focus:border-emerald-400 focus:outline-none">
         <option value="" {{if eq .Filter.Status ""}}selected{{end}}>All statuses</option>
@@ -45,7 +48,7 @@
         <option value="info"    {{if eq .Filter.Level "info"}}selected{{end}}>Info</option>
         <option value="debug"   {{if eq .Filter.Level "debug"}}selected{{end}}>Debug</option>
       </select>
-      {{if or .Filter.Status .Filter.Platform .Filter.Environment .Filter.Level}}
+      {{if or .Filter.Status .Filter.Platform .Filter.Environment .Filter.Level .Filter.Search}}
       <a href="/issues"
         class="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:border-slate-500 hover:text-slate-300">
         Clear
@@ -56,7 +59,7 @@
 
   {{if not .Issues}}
   <section class="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center text-slate-400">
-    {{if or .Filter.Status .Filter.Platform .Filter.Environment .Filter.Level}}
+    {{if or .Filter.Status .Filter.Platform .Filter.Environment .Filter.Level .Filter.Search}}
     No issues match the current filters.
     {{else}}
     No issues yet. Send a Sentry event to your DSN and reload this page.
@@ -86,7 +89,7 @@
   {{if .NextCursor}}
   <div class="flex justify-center">
     <button
-      hx-get="/issues?status={{.Filter.Status}}&platform={{.Filter.Platform}}&env={{.Filter.Environment}}&level={{.Filter.Level}}&cursor={{.NextCursor}}"
+      hx-get="/issues?status={{.Filter.Status}}&platform={{.Filter.Platform}}&env={{.Filter.Environment}}&level={{.Filter.Level}}&q={{.Filter.Search}}&cursor={{.NextCursor}}"
       hx-target="main" hx-select="main" hx-swap="outerHTML"
       class="rounded-lg border border-slate-700 px-5 py-2.5 text-sm text-slate-300 hover:border-emerald-400 hover:text-emerald-300">
       Load more

@@ -1,0 +1,125 @@
+{{template "header" .}}
+<main class="space-y-8">
+  <div>
+    <h1 class="text-3xl font-semibold tracking-tight">Dashboard</h1>
+    <p class="mt-1 text-sm text-slate-400">Overview of your error tracker.</p>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Open issues</p>
+      <p class="mt-2 text-4xl font-semibold text-slate-100">{{.Stats.OpenIssues}}</p>
+    </div>
+    <div class="rounded-2xl border border-rose-900/40 bg-rose-950/20 p-5">
+      <p class="text-xs font-medium uppercase tracking-wide text-rose-500">Fatal open</p>
+      <p class="mt-2 text-4xl font-semibold text-rose-300">{{.Stats.FatalOpenIssues}}</p>
+    </div>
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Events / 24h</p>
+      <p class="mt-2 text-4xl font-semibold text-slate-100">{{.Stats.Events24h}}</p>
+    </div>
+    <div class="rounded-2xl border border-emerald-900/40 bg-emerald-950/20 p-5">
+      <p class="text-xs font-medium uppercase tracking-wide text-emerald-600">Resolved / 7d</p>
+      <p class="mt-2 text-4xl font-semibold text-emerald-300">{{.Stats.ResolvedLast7d}}</p>
+    </div>
+  </div>
+
+  <!-- Event volume chart -->
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+    <p class="mb-4 text-xs font-medium uppercase tracking-wide text-slate-500">Event volume — last 14 days</p>
+    {{if .EventVolume}}
+    <div class="overflow-hidden">
+      {{sparklineSVG .EventVolume}}
+    </div>
+    <div class="mt-2 flex justify-between text-[10px] text-slate-600">
+      <span>{{(index .EventVolume 0).Day}}</span>
+      <span>{{(index .EventVolume (sub (len .EventVolume) 1)).Day}}</span>
+    </div>
+    {{else}}
+    <p class="text-sm text-slate-500">No events yet.</p>
+    {{end}}
+  </div>
+
+  <!-- Breakdowns -->
+  <div class="grid gap-6 lg:grid-cols-2">
+
+    <!-- By level -->
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <p class="mb-4 text-xs font-medium uppercase tracking-wide text-slate-500">Open issues by level</p>
+      {{if .Stats.LevelCounts}}
+      <div class="space-y-3">
+        {{$total := .Stats.OpenIssues}}
+        {{range .Stats.LevelCounts}}
+        <div>
+          <div class="mb-1 flex justify-between text-sm">
+            <span class="inline-flex items-center gap-1.5">
+              <span class="inline-block h-2 w-2 rounded-full
+                {{if eq .Level "fatal"}}bg-rose-400{{else if eq .Level "error"}}bg-rose-600{{else if eq .Level "warning"}}bg-amber-400{{else if eq .Level "info"}}bg-sky-400{{else}}bg-slate-500{{end}}">
+              </span>
+              <span class="text-slate-300">{{.Level}}</span>
+            </span>
+            <span class="text-slate-400">{{.Count}}</span>
+          </div>
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+            {{if gt $total 0}}
+            <div class="h-full rounded-full
+              {{if eq .Level "fatal"}}bg-rose-400{{else if eq .Level "error"}}bg-rose-600{{else if eq .Level "warning"}}bg-amber-400{{else if eq .Level "info"}}bg-sky-400{{else}}bg-slate-500{{end}}"
+              style="width:{{pct .Count $total}}%"></div>
+            {{end}}
+          </div>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="text-sm text-slate-500">No open issues.</p>
+      {{end}}
+    </div>
+
+    <!-- By platform -->
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <p class="mb-4 text-xs font-medium uppercase tracking-wide text-slate-500">Open issues by platform</p>
+      {{if .Stats.PlatformCounts}}
+      <div class="space-y-3">
+        {{$total := .Stats.OpenIssues}}
+        {{range .Stats.PlatformCounts}}
+        <div>
+          <div class="mb-1 flex justify-between text-sm">
+            <span class="text-slate-300">{{.Platform}}</span>
+            <span class="text-slate-400">{{.Count}}</span>
+          </div>
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+            {{if gt $total 0}}
+            <div class="h-full rounded-full bg-emerald-500/60"
+                 style="width:{{pct .Count $total}}%"></div>
+            {{end}}
+          </div>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="text-sm text-slate-500">No open issues.</p>
+      {{end}}
+    </div>
+  </div>
+
+  <!-- Top open issues -->
+  {{if .Issues}}
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/70">
+    <div class="border-b border-slate-800 px-5 py-3">
+      <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Top open issues</p>
+    </div>
+    <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+      <tbody class="divide-y divide-slate-800">
+        {{range .Issues}}
+        {{template "issue-row" .}}
+        {{end}}
+      </tbody>
+    </table>
+    <div class="border-t border-slate-800 px-5 py-3">
+      <a href="/issues?status=open" class="text-xs text-emerald-400 hover:text-emerald-300">View all open issues →</a>
+    </div>
+  </div>
+  {{end}}
+</main>
+{{template "footer" .}}
